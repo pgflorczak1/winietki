@@ -49,7 +49,7 @@
   const DEFAULTS = {
     names: 'Anna Kowalska\nŁukasz Żółkiewski | Stół 2\nMałgorzata Świątek\nJędrzej Ćwikła | Stół 5\nZofia Łęcka',
     fontId: 'GreatVibes', font2Id: 'CormorantGaramond',
-    maxSize: 40, padding: 10, sameSize: false, subSize: 10,
+    maxSize: 40, padding: 10, sameSize: false, wrap: true, subSize: 10, bleed: true,
     bg: '#FFFFFF', ink: '#1A1A1A', accent: '#A9844C',
     ornament: 'none', border: 'none',
     w: 90, h: 50, folded: true, bothSides: true,
@@ -84,10 +84,15 @@
     const font = fk[fontId];
     const run = font.layout(text);
     let x = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    const glyphs = [];
+    const glyphs = [], missing = [];
     run.glyphs.forEach((g, i) => {
       const p = run.positions[i];
       const gx = x + p.xOffset, gy = p.yOffset;
+      if (g.id === 0) { // znak, którego nie ma w czcionce – pomijamy zamiast rysować „pudełko”
+        missing.push(String.fromCodePoint(...(g.codePoints || [])));
+        x += p.xAdvance * 0.3;
+        return;
+      }
       const b = g.bbox;
       if (isFinite(b.minX) && b.maxX > b.minX) {
         minX = Math.min(minX, gx + b.minX); maxX = Math.max(maxX, gx + b.maxX);
@@ -98,7 +103,7 @@
     });
     if (!isFinite(minX)) { minX = 0; maxX = 0; minY = 0; maxY = 0; }
     const u = font.unitsPerEm;
-    L = { glyphs, upm: u, minX: minX / u, maxX: maxX / u, minY: minY / u, maxY: maxY / u };
+    L = { glyphs, missing, upm: u, minX: minX / u, maxX: maxX / u, minY: minY / u, maxY: maxY / u };
     layoutCache.set(key, L);
     return L;
   }
@@ -153,14 +158,37 @@
     return { W, H, cellW: W, cellH: S.folded ? 2 * H : H };
   }
 
-  // Rozmiar imienia, który mieści się w winietce
-  function fitSize(e, g) {
-    const padX = g.W * S.padding / 100, padY = g.H * S.padding / 100;
-    const availW = g.W - 2 * padX, availH = g.H - 2 * padY;
-    const L = textLayout(S.fontId, e.main);
-    const bw = L.maxX - L.minX || 1, bh = L.maxY - L.minY || 1;
+  // Podział imienia na linie: ręcznie przez "/", automatycznie gdy w jednej linii byłoby za małe
+  const LINE_GAP = 0.12; // odstęp między liniami imienia (w em)
+  function candidates(text) {
+    if (text.includes('/')) return [text.split('/').map((s) => s.trim()).filter(Boolean)];
+    const c = [[text]];
+    if (S.wrap) {
+      const words = text.split(/\s+/);
+      for (let i = 1; i < words.length; i++) c.push([words.slice(0, i).join(' '), words.slice(i).join(' ')]);
+      // nazwiska dwuczłonowe: łamanie po myślniku
+      for (let i = text.indexOf('-'); i > 0; i = text.indexOf('-', i + 1)) c.push([text.slice(0, i + 1).trim(), text.slice(i + 1).trim()]);
+    }
+    return c;
+  }
+  function blockMetrics(lines) { // przy rozmiarze 1
+    const Ls = lines.map((t) => textLayout(S.fontId, t));
+    const w = Math.max(...Ls.map((L) => (L.maxX - L.minX) || 0.01));
+    const h = Ls.reduce((a, L) => a + ((L.maxY - L.minY) || 0.01), 0) + LINE_GAP * (Ls.length - 1);
+    return { Ls, w, h };
+  }
+  function fitMain(e, g) {
+    const availW = g.W * (1 - 2 * S.padding / 100), availH = g.H * (1 - 2 * S.padding / 100);
     const extra = extraHeight(e, g);
-    return Math.max(4, Math.min(S.maxSize, availW / bw, Math.max(availH - extra.total, availH * 0.3) / bh));
+    const hAvail = Math.max(availH - extra.total, availH * 0.3);
+    let best = null;
+    candidates(e.main).forEach((lines, idx) => {
+      const m = blockMetrics(lines);
+      const size = Math.max(4, Math.min(S.maxSize, availW / m.w, hAvail / m.h));
+      const score = idx === 0 ? size * 1.3 : size; // jedna linia ma pierwszeństwo, jeśli różnica jest mała
+      if (!best || score > best.score) best = { score, size, ...m };
+    });
+    return best;
   }
 
   function extraHeight(e, g) {
@@ -177,14 +205,14 @@
     return { gap, ornH, subH, subSize, subL, total };
   }
 
-  function computeSizes(entries, g) {
-    const sizes = entries.map((e) => fitSize(e, g));
-    if (S.sameSize && sizes.length) { const m = Math.min(...sizes); return sizes.map(() => m); }
-    return sizes;
+  function computeBlocks(entries, g) {
+    const blocks = entries.map((e) => fitMain(e, g));
+    if (S.sameSize && blocks.length) { const m = Math.min(...blocks.map((b) => b.size)); blocks.forEach((b) => { b.size = m; }); }
+    return blocks;
   }
 
   // ---------- Rysowanie winietki (lista operacji w pt, y w dół) ----------
-  function faceOps(ops, e, size, g, x, y, rotated, withText) {
+  function faceOps(ops, e, blk, g, x, y, rotated, withText) {
     const T = rotated ? (px, py) => [2 * x + g.W - px, 2 * y + g.H - py] : null;
     const W = g.W, H = g.H;
 
@@ -209,22 +237,27 @@
     }
     if (!withText) return;
 
-    const L = textLayout(S.fontId, e.main);
+    const size = blk.size;
     const ex = extraHeight(e, g);
-    const hm = (L.maxY - L.minY) * size;
+    const hm = blk.h * size;
     const cx = x + W / 2, cy = y + H / 2;
     const top = cy - (hm + ex.total) / 2;
 
-    // Imię
-    const ox = cx - (L.minX + L.maxX) / 2 * size;
-    ops.push({ d: new Pen(T).text(L, size, ox, top + L.maxY * size).str, fill: S.ink });
+    // Imię (1 lub więcej linii)
+    const pen = new Pen(T);
+    let yy = top;
+    blk.Ls.forEach((L, i) => {
+      if (i) yy += LINE_GAP * size;
+      pen.text(L, size, cx - (L.minX + L.maxX) / 2 * size, yy + L.maxY * size);
+      yy += (L.maxY - L.minY) * size;
+    });
+    ops.push({ d: pen.str, fill: S.ink });
 
-    let yy = top + hm;
     // Ozdoba
     if (ex.ornH) {
       yy += ex.gap;
       const oy = yy + ex.ornH / 2;
-      const inkW = (L.maxX - L.minX) * size;
+      const inkW = blk.w * size;
       const lw = Math.min(W * (1 - 2 * S.padding / 100) * 0.6, Math.max(inkW * 0.55, 28));
       if (S.ornament === 'line') {
         ops.push({ d: new Pen(T).M(cx - lw / 2, oy).L(cx + lw / 2, oy).str, stroke: S.accent, lw: 0.6 });
@@ -248,13 +281,13 @@
     }
   }
 
-  function cardOps(ops, e, size, g, x, y) {
-    ops.push({ d: new Pen().rect(x, y, g.cellW, g.cellH).str, fill: S.bg });
+  function cardOps(ops, e, blk, g, x, y, bleed = 0) {
+    ops.push({ d: new Pen().rect(x - bleed, y - bleed, g.cellW + 2 * bleed, g.cellH + 2 * bleed).str, fill: S.bg });
     if (S.folded) {
-      faceOps(ops, e, size, g, x, y, true, S.bothSides);  // tył (do góry nogami)
-      faceOps(ops, e, size, g, x, y + g.H, false, true);  // przód
+      faceOps(ops, e, blk, g, x, y, true, S.bothSides);  // tył (do góry nogami)
+      faceOps(ops, e, blk, g, x, y + g.H, false, true);  // przód
     } else {
-      faceOps(ops, e, size, g, x, y, false, true);
+      faceOps(ops, e, blk, g, x, y, false, true);
     }
   }
 
@@ -274,6 +307,7 @@
     else r = (Lnd.cols * Lnd.rows > P.cols * P.rows) ? Lnd : P;
     r.per = r.cols * r.rows;
     r.gap = gap;
+    r.bleed = S.bleed ? Math.min(2 * MM, gap / 2, m) : 0; // spad tła, żeby po cięciu nie zostały białe krawędzie
     r.gridW = r.cols * g.cellW + Math.max(0, r.cols - 1) * gap;
     r.gridH = r.rows * g.cellH + Math.max(0, r.rows - 1) * gap;
     r.x0 = (r.pw - r.gridW) / 2;
@@ -288,7 +322,7 @@
     slice.forEach((e, i) => {
       const c = i % P.cols, r = Math.floor(i / P.cols);
       const x = P.x0 + c * (g.cellW + P.gap), y = P.y0 + r * (g.cellH + P.gap);
-      cardOps(ops, e, sizes[start + i], g, x, y);
+      cardOps(ops, e, sizes[start + i], g, x, y, P.bleed);
       if (S.cut === 'lines') ops.push({ d: new Pen().rect(x, y, g.cellW, g.cellH).str, stroke: '#9A9A9A', lw: 0.3 });
     });
     if (S.cut !== 'none' && slice.length) cutMarks(ops, g, P, slice.length);
@@ -297,7 +331,7 @@
 
   function cutMarks(ops, g, P, count) {
     const usedRows = Math.ceil(count / P.cols), usedCols = Math.min(P.cols, count);
-    const off = 3, p = new Pen(), fold = new Pen();
+    const off = 3 + P.bleed, p = new Pen(), fold = new Pen();
     const gridBottom = P.y0 + usedRows * g.cellH + (usedRows - 1) * P.gap;
     const gridRight = P.x0 + usedCols * g.cellW + (usedCols - 1) * P.gap;
     const lenV = Math.min(14, P.y0 - off - 2), lenH = Math.min(14, P.x0 - off - 2);
@@ -370,7 +404,7 @@
       await Promise.all([loadFont(byId(S.fontId)), loadFont(byId(S.font2Id))]);
       const g = geometry(), P = pageLayout(g);
       if (!P.per) { status('Winietka nie mieści się na wybranym papierze.'); return; }
-      const sizes = computeSizes(entries, g);
+      const sizes = computeBlocks(entries, g);
       const doc = await PDFLib.PDFDocument.create();
       doc.setTitle('Winietki'); doc.setCreator('Generator winietek');
       const pages = Math.ceil(entries.length / P.per);
@@ -404,7 +438,7 @@
     const placeholder = !entries.length;
     if (placeholder) entries = [{ main: 'Imię Nazwisko', sub: '' }];
     const g = geometry();
-    const sizes = computeSizes(entries, g);
+    const sizes = computeBlocks(entries, g);
     nameIdx = Math.min(Math.max(0, nameIdx), entries.length - 1);
 
     // Pojedyncza winietka
@@ -418,6 +452,15 @@
       ctx.beginPath(); ctx.moveTo(0, g.H); ctx.lineTo(g.W, g.H); ctx.stroke(); ctx.restore();
     }
     $('nameIdx').textContent = placeholder ? '–' : `${nameIdx + 1} / ${entries.length}`;
+
+    // Znaki, których wybrana czcionka nie ma
+    const miss = new Set(), who = [];
+    entries.forEach((e, i) => {
+      const m = [...sizes[i].Ls.flatMap((L) => L.missing), ...(e.sub ? textLayout(S.font2Id, e.sub).missing : [])];
+      if (m.length) { m.forEach((c) => miss.add(c)); who.push(e.main); }
+    });
+    $('warn').hidden = !miss.size;
+    $('warn').textContent = miss.size ? `Uwaga: czcionka nie ma znaków ${[...miss].join(' ')} – zostaną pominięte (${who.slice(0, 3).join(', ')}${who.length > 3 ? '…' : ''}).` : '';
 
     // Arkusz
     const P = pageLayout(g);
@@ -540,7 +583,7 @@
       });
     };
     bind('names', 'names');
-    bind('maxSize', 'maxSize', 'num'); bind('padding', 'padding', 'num'); bind('sameSize', 'sameSize', 'check');
+    bind('maxSize', 'maxSize', 'num'); bind('padding', 'padding', 'num'); bind('sameSize', 'sameSize', 'check'); bind('wrap', 'wrap', 'check'); bind('bleed', 'bleed', 'check');
     bind('font2', 'font2Id'); bind('subSize', 'subSize', 'num');
     bind('ornament', 'ornament'); bind('border', 'border');
     bind('w', 'w', 'num'); bind('h', 'h', 'num'); bind('folded', 'folded', 'check'); bind('bothSides', 'bothSides', 'check');

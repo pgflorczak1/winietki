@@ -40,6 +40,7 @@
           <input type="range" id="padding" min="3" max="30" step="1"><output id="paddingOut"></output>
         </label>
       </div>
+      <label class="check"><input type="checkbox" id="wrap"> Długie imiona łam na 2 linie (ręcznie: znak <code>/</code>, np. <code>Maria / Nowak-Wiśniewska</code>)</label>
       <label class="check"><input type="checkbox" id="sameSize"> Jedna wielkość dla wszystkich imion (wg najdłuższego)</label>
       <div class="grid2">
         <label>Czcionka 2. linii
@@ -115,6 +116,7 @@
           </select>
         </label>
       </div>
+      <label class="check"><input type="checkbox" id="bleed"> Spad tła 2 mm (kolorowe tło wychodzi poza linię cięcia – bez białych krawędzi)</label>
       <div class="grid2">
         <label>Margines strony (mm)<input type="number" id="margin" min="0" max="40" step="1"></label>
         <label>Odstęp między winietkami (mm)<input type="number" id="gap" min="0" max="30" step="1"></label>
@@ -133,6 +135,7 @@
         </div>
       </div>
       <div class="stage"><canvas id="cardCanvas"></canvas></div>
+      <p id="warn" class="warn" hidden></p>
     </div>
 
     <div class="card-block">
