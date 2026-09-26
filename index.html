@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Winietki weselne – generator PDF</title>
+<meta name="description" content="Wklej listę gości, wybierz czcionkę, kolory i rozmiar – pobierz gotowy PDF z winietkami do druku.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <h1>Winietki weselne</h1>
+  <p>Wklej listę gości, dobierz wygląd i pobierz PDF gotowy do druku.</p>
+</header>
+
+<main class="layout">
+  <section class="panel">
+    <!-- GOŚCIE -->
+    <details open>
+      <summary>1. Lista gości <span id="guestCount" class="badge">0</span></summary>
+      <p class="hint">Jedna osoba w linii. Druga linijka (np. numer stołu) po znaku <code>|</code> – np. <code>Anna Nowak | Stół 3</code></p>
+      <textarea id="names" rows="10" spellcheck="false" placeholder="Anna Kowalska&#10;Łukasz Żółkiewski | Stół 2&#10;Małgorzata Świątek"></textarea>
+      <div class="row wrap">
+        <label class="btn small file">Wczytaj .txt / .csv<input type="file" id="fileInput" accept=".txt,.csv,text/plain,text/csv" hidden></label>
+        <button class="btn small ghost" id="sortBtn" type="button">Sortuj A–Z</button>
+        <button class="btn small ghost" id="dedupeBtn" type="button">Usuń duplikaty</button>
+      </div>
+    </details>
+
+    <!-- CZCIONKA -->
+    <details open>
+      <summary>2. Czcionka</summary>
+      <div id="fontGrid" class="font-grid" role="listbox" aria-label="Czcionka imion"></div>
+      <div class="grid2">
+        <label>Maks. wielkość imienia (pt)
+          <input type="range" id="maxSize" min="12" max="96" step="1"><output id="maxSizeOut"></output>
+        </label>
+        <label>Margines wewnętrzny (%)
+          <input type="range" id="padding" min="3" max="30" step="1"><output id="paddingOut"></output>
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" id="sameSize"> Jedna wielkość dla wszystkich imion (wg najdłuższego)</label>
+      <div class="grid2">
+        <label>Czcionka 2. linii
+          <select id="font2"></select>
+        </label>
+        <label>Wielkość 2. linii (pt)
+          <input type="number" id="subSize" min="5" max="40" step="0.5">
+        </label>
+      </div>
+    </details>
+
+    <!-- KOLORY -->
+    <details open>
+      <summary>3. Kolory</summary>
+      <div class="label">Tło</div>
+      <div id="bgSwatches" class="swatches"></div>
+      <div class="label">Tekst</div>
+      <div id="textSwatches" class="swatches"></div>
+      <div class="grid2">
+        <label>Ozdoba
+          <select id="ornament">
+            <option value="none">brak</option>
+            <option value="line">kreska pod imieniem</option>
+            <option value="diamond">kreska z rombem</option>
+            <option value="dots">trzy kropki</option>
+          </select>
+        </label>
+        <label>Ramka
+          <select id="border">
+            <option value="none">brak</option>
+            <option value="thin">cienka</option>
+            <option value="double">podwójna</option>
+            <option value="corners">narożniki</option>
+          </select>
+        </label>
+      </div>
+      <div class="label">Kolor ozdób i ramki</div>
+      <div id="accentSwatches" class="swatches"></div>
+    </details>
+
+    <!-- ROZMIAR -->
+    <details open>
+      <summary>4. Rozmiar i układ</summary>
+      <div class="label">Rozmiar winietki (widoczna strona)</div>
+      <div id="sizePresets" class="chips"></div>
+      <div class="grid2">
+        <label>Szerokość (mm)<input type="number" id="w" min="20" max="280" step="1"></label>
+        <label>Wysokość (mm)<input type="number" id="h" min="15" max="200" step="1"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="folded"> Winietka składana (stojąca) – drukuje podwójną wysokość z linią zgięcia</label>
+      <label class="check indent" id="bothSidesWrap"><input type="checkbox" id="bothSides"> Imię po obu stronach</label>
+      <div class="grid3">
+        <label>Papier
+          <select id="paper">
+            <option value="A4">A4</option>
+            <option value="A3">A3</option>
+            <option value="A5">A5</option>
+            <option value="Letter">Letter</option>
+          </select>
+        </label>
+        <label>Orientacja
+          <select id="orient">
+            <option value="auto">auto (najwięcej)</option>
+            <option value="portrait">pionowa</option>
+            <option value="landscape">pozioma</option>
+          </select>
+        </label>
+        <label>Linie cięcia
+          <select id="cut">
+            <option value="marks">znaczniki na marginesie</option>
+            <option value="lines">cienki obrys</option>
+            <option value="none">brak</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Margines strony (mm)<input type="number" id="margin" min="0" max="40" step="1"></label>
+        <label>Odstęp między winietkami (mm)<input type="number" id="gap" min="0" max="30" step="1"></label>
+      </div>
+    </details>
+  </section>
+
+  <section class="preview">
+    <div class="card-block">
+      <div class="preview-head">
+        <h2>Podgląd winietki</h2>
+        <div class="pager">
+          <button class="btn icon" id="prevName" type="button" aria-label="Poprzednie imię">‹</button>
+          <span id="nameIdx">–</span>
+          <button class="btn icon" id="nextName" type="button" aria-label="Następne imię">›</button>
+        </div>
+      </div>
+      <div class="stage"><canvas id="cardCanvas"></canvas></div>
+    </div>
+
+    <div class="card-block">
+      <div class="preview-head">
+        <h2>Arkusz <span id="sheetInfo" class="muted"></span></h2>
+        <div class="pager">
+          <button class="btn icon" id="prevPage" type="button" aria-label="Poprzednia strona">‹</button>
+          <span id="pageIdx">–</span>
+          <button class="btn icon" id="nextPage" type="button" aria-label="Następna strona">›</button>
+        </div>
+      </div>
+      <div class="stage sheet"><canvas id="pageCanvas"></canvas></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="pdfBtn" type="button">Pobierz PDF</button>
+      <p id="status" class="muted" aria-live="polite"></p>
+      <p class="hint">Drukuj w skali 100% („Rzeczywisty rozmiar”), bez dopasowania do strony. Najlepiej na papierze 200–300 g/m².</p>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">Czcionki: Google Fonts (SIL Open Font License). Wszystko działa w przeglądarce – lista gości nie jest nigdzie wysyłana.</footer>
+
+<script src="lib/pdf-lib.min.js"></script>
+<script src="lib/fontkit.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
