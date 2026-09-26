@@ -52,13 +52,14 @@
     maxSize: 40, padding: 10, sameSize: false, wrap: true, subSize: 10, bleed: true,
     bg: '#FFFFFF', ink: '#1A1A1A', accent: '#A9844C',
     ornament: 'none', border: 'none',
-    w: 90, h: 50, folded: true, bothSides: true,
+    w: 90, h: 50,
     paper: 'A4', orient: 'auto', cut: 'marks', margin: 10, gap: 4,
   };
   const STORE_KEY = 'winietki-v1';
 
   let S = { ...DEFAULTS };
   try { Object.assign(S, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* brak storage */ }
+  delete S.folded; delete S.bothSides; // stare ustawienia
   const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* ignoruj */ } };
 
   const $ = (id) => document.getElementById(id);
@@ -155,7 +156,7 @@
 
   function geometry() {
     const W = S.w * MM, H = S.h * MM;
-    return { W, H, cellW: W, cellH: S.folded ? 2 * H : H };
+    return { W, H, cellW: W, cellH: H };
   }
 
   // Podział imienia na linie: ręcznie przez "/", automatycznie gdy w jednej linii byłoby za małe
@@ -185,7 +186,7 @@
     candidates(e.main).forEach((lines, idx) => {
       const m = blockMetrics(lines);
       const size = Math.max(4, Math.min(S.maxSize, availW / m.w, hAvail / m.h));
-      const score = idx === 0 ? size * 1.3 : size; // jedna linia ma pierwszeństwo, jeśli różnica jest mała
+      const score = idx === 0 ? size * 1.45 : size; // 2 linie tylko gdy w 1 linii imię byłoby wyraźnie mniejsze
       if (!best || score > best.score) best = { score, size, ...m };
     });
     return best;
@@ -212,8 +213,8 @@
   }
 
   // ---------- Rysowanie winietki (lista operacji w pt, y w dół) ----------
-  function faceOps(ops, e, blk, g, x, y, rotated, withText) {
-    const T = rotated ? (px, py) => [2 * x + g.W - px, 2 * y + g.H - py] : null;
+  function faceOps(ops, e, blk, g, x, y) {
+    const T = null;
     const W = g.W, H = g.H;
 
     // Ramka
@@ -235,7 +236,6 @@
         ops.push({ d: p.str, stroke: S.accent, lw: 0.8 });
       }
     }
-    if (!withText) return;
 
     const size = blk.size;
     const ex = extraHeight(e, g);
@@ -283,12 +283,7 @@
 
   function cardOps(ops, e, blk, g, x, y, bleed = 0) {
     ops.push({ d: new Pen().rect(x - bleed, y - bleed, g.cellW + 2 * bleed, g.cellH + 2 * bleed).str, fill: S.bg });
-    if (S.folded) {
-      faceOps(ops, e, blk, g, x, y, true, S.bothSides);  // tył (do góry nogami)
-      faceOps(ops, e, blk, g, x, y + g.H, false, true);  // przód
-    } else {
-      faceOps(ops, e, blk, g, x, y, false, true);
-    }
+    faceOps(ops, e, blk, g, x, y);
   }
 
   // ---------- Arkusz ----------
@@ -331,7 +326,7 @@
 
   function cutMarks(ops, g, P, count) {
     const usedRows = Math.ceil(count / P.cols), usedCols = Math.min(P.cols, count);
-    const off = 3 + P.bleed, p = new Pen(), fold = new Pen();
+    const off = 3 + P.bleed, p = new Pen();
     const gridBottom = P.y0 + usedRows * g.cellH + (usedRows - 1) * P.gap;
     const gridRight = P.x0 + usedCols * g.cellW + (usedCols - 1) * P.gap;
     const lenV = Math.min(14, P.y0 - off - 2), lenH = Math.min(14, P.x0 - off - 2);
@@ -353,19 +348,7 @@
         }
       }
     }
-    // Linie zgięcia (przerywane, tylko na marginesie)
-    if (S.folded && lenH > 2) {
-      for (let r = 0; r < usedRows; r++) {
-        const y = P.y0 + r * (g.cellH + P.gap) + g.H;
-        for (let k = 0; k < lenH; k += 3) {
-          const a = Math.min(k + 1.6, lenH);
-          fold.M(P.x0 - off - k, y).L(P.x0 - off - a, y);
-          fold.M(gridRight + off + k, y).L(gridRight + off + a, y);
-        }
-      }
-    }
     if (p.d.length) ops.push({ d: p.str, stroke: '#555555', lw: 0.4 });
-    if (fold.d.length) ops.push({ d: fold.str, stroke: '#555555', lw: 0.4 });
   }
 
   // ---------- Renderery ----------
@@ -447,10 +430,6 @@
     const ops = [];
     cardOps(ops, entries[nameIdx], sizes[nameIdx], g, 0, 0);
     drawOps(ctx, ops);
-    if (S.folded) { // linia zgięcia tylko w podglądzie
-      ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(128,128,128,.6)'; ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(0, g.H); ctx.lineTo(g.W, g.H); ctx.stroke(); ctx.restore();
-    }
     $('nameIdx').textContent = placeholder ? '–' : `${nameIdx + 1} / ${entries.length}`;
 
     // Znaki, których wybrana czcionka nie ma
@@ -508,8 +487,6 @@
   function update(opts = {}) {
     save();
     $('guestCount').textContent = parseNames().length;
-    $('bothSidesWrap').classList.toggle('disabled', !S.folded);
-    $('bothSides').disabled = !S.folded;
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(() => { renderPreview(); if (opts.tiles) renderFontTiles(); });
   }
@@ -586,7 +563,7 @@
     bind('maxSize', 'maxSize', 'num'); bind('padding', 'padding', 'num'); bind('sameSize', 'sameSize', 'check'); bind('wrap', 'wrap', 'check'); bind('bleed', 'bleed', 'check');
     bind('font2', 'font2Id'); bind('subSize', 'subSize', 'num');
     bind('ornament', 'ornament'); bind('border', 'border');
-    bind('w', 'w', 'num'); bind('h', 'h', 'num'); bind('folded', 'folded', 'check'); bind('bothSides', 'bothSides', 'check');
+    bind('w', 'w', 'num'); bind('h', 'h', 'num');
     bind('paper', 'paper'); bind('orient', 'orient'); bind('cut', 'cut');
     bind('margin', 'margin', 'num'); bind('gap', 'gap', 'num');
 

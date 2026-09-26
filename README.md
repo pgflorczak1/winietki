@@ -2,10 +2,10 @@
 
 Aplikacja w przeglądarce: wklejasz listę gości, wybierasz czcionkę (21 ozdobnych krojów z pełną obsługą polskich znaków), kolory tła i tekstu, ozdoby, ramkę, rozmiar winietki – i pobierasz PDF gotowy do druku.
 
-- winietki płaskie lub składane (stojące, imię po obu stronach)
+- winietki jednostronne, płaskie
 - druga linijka po znaku `|`, np. `Anna Nowak | Stół 3`
-- automatyczne dopasowanie wielkości imienia, opcjonalnie jedna wielkość dla wszystkich
-- A4 / A3 / A5 / Letter, automatyczna orientacja, znaczniki cięcia i zgięcia
+- automatyczne dopasowanie wielkości imienia i łamanie długich imion na 2 linie (ręcznie: `/`)
+- A4 / A3 / A5 / Letter, automatyczna orientacja, znaczniki cięcia, spad tła
 - tekst w PDF jest wektorowy (ostry w każdym rozmiarze)
 - wszystko działa lokalnie w przeglądarce, lista gości nigdzie nie jest wysyłana
 
